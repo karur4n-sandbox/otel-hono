@@ -6,6 +6,7 @@
       "name": "2026-04-03-otel-hono",
       "dependencies": {
         "@opentelemetry/api": "^1.9.1",
+        "@opentelemetry/api-logs": "^0.214.0",
         "@opentelemetry/exporter-logs-otlp-http": "^0.214.0",
         "@opentelemetry/exporter-metrics-otlp-http": "^0.214.0",
         "@opentelemetry/exporter-trace-otlp-http": "^0.214.0",

@@ -4,6 +4,7 @@ import {
   BasicTracerProvider,
   ConsoleSpanExporter,
   SimpleSpanProcessor,
+  BatchSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import {
   MeterProvider,
@@ -14,6 +15,7 @@ import {
   LoggerProvider,
   ConsoleLogRecordExporter,
   SimpleLogRecordProcessor,
+  BatchLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
@@ -21,7 +23,7 @@ import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { trace, metrics } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
 
-const OTLP_ENDPOINT = "http://localhost:4318";
+const OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318";
 
 const resource = resourceFromAttributes({
   [ATTR_SERVICE_NAME]: "otel-hono-demo",
@@ -32,7 +34,7 @@ const tracerProvider = new BasicTracerProvider({
   resource,
   spanProcessors: [
     new SimpleSpanProcessor(new ConsoleSpanExporter()),
-    new SimpleSpanProcessor(new OTLPTraceExporter({ url: `${OTLP_ENDPOINT}/v1/traces` })),
+    new BatchSpanProcessor(new OTLPTraceExporter({ url: `${OTLP_ENDPOINT}/v1/traces` })),
   ],
 });
 trace.setGlobalTracerProvider(tracerProvider);
@@ -58,7 +60,7 @@ const loggerProvider = new LoggerProvider({
   resource,
   processors: [
     new SimpleLogRecordProcessor(new ConsoleLogRecordExporter()),
-    new SimpleLogRecordProcessor(new OTLPLogExporter({ url: `${OTLP_ENDPOINT}/v1/logs` })),
+    new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${OTLP_ENDPOINT}/v1/logs` })),
   ],
 });
 logs.setGlobalLoggerProvider(loggerProvider);
