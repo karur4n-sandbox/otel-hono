@@ -1,6 +1,7 @@
 import { createMiddleware } from "hono/factory";
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
+import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
 import { tracer, meter, logger } from "../otel";
 
@@ -66,8 +67,10 @@ export const telemetryMiddleware = createMiddleware(async (c, next) => {
         });
       } catch (err) {
         route = routePath(c);
+        status = err instanceof HTTPException ? err.status : 500;
         span.updateName(`${method} ${route}`);
         span.setAttribute("http.route", route);
+        span.setAttribute("http.status_code", status);
         span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
         span.recordException(err as Error);
 
