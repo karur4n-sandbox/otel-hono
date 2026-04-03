@@ -1,7 +1,9 @@
 import { Hono } from "hono";
-import { tracer } from "../otel";
+import { trace } from "@opentelemetry/api";
 
 const app = new Hono();
+
+const tracer = trace.getTracer("otel-hono-demo");
 
 app.get("/hello", (c) => {
   return c.json({ message: "Hello, OTel!" });

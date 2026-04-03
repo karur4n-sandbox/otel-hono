@@ -1,9 +1,9 @@
 import { createMiddleware } from "hono/factory";
-import { context, SpanStatusCode } from "@opentelemetry/api";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
-import { tracer, meter, logger } from "../otel";
+import { meter, logger } from "../otel";
 
 const requestDuration = meter.createHistogram("http.server.request.duration", {
   description: "Duration of HTTP server requests",
@@ -20,77 +20,58 @@ export const telemetryMiddleware = createMiddleware(async (c, next) => {
   let status = 500;
   let route = c.req.path;
 
+  const span = trace.getActiveSpan();
+
   activeRequests.add(1, { "http.method": method });
 
   try {
-    await tracer.startActiveSpan(`${method} ${route}`, async (span) => {
-      span.setAttributes({
+    await next();
+
+    route = routePath(c);
+    status = c.res.status;
+
+    if (span) {
+      span.updateName(`${method} ${route}`);
+      span.setAttribute("http.route", route);
+    }
+
+    if (status >= 400 && span) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${status}` });
+    }
+
+    logger.emit({
+      severityNumber: status >= 400 ? SeverityNumber.ERROR : SeverityNumber.INFO,
+      severityText: status >= 400 ? "ERROR" : "INFO",
+      body: `Response: ${method} ${route} ${status}`,
+      attributes: {
         "http.method": method,
-        "http.url": c.req.url,
         "http.route": route,
-      });
-
-      logger.emit({
-        severityNumber: SeverityNumber.INFO,
-        severityText: "INFO",
-        body: `Incoming request: ${method} ${route}`,
-        context: context.active(),
-        attributes: {
-          "http.method": method,
-          "http.route": route,
-        },
-      });
-
-      try {
-        await next();
-
-        route = routePath(c);
-        status = c.res.status;
-        span.updateName(`${method} ${route}`);
-        span.setAttribute("http.route", route);
-        span.setAttribute("http.status_code", status);
-
-        if (status >= 400) {
-          span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${status}` });
-        }
-
-        logger.emit({
-          severityNumber: status >= 400 ? SeverityNumber.ERROR : SeverityNumber.INFO,
-          severityText: status >= 400 ? "ERROR" : "INFO",
-          body: `Response: ${method} ${route} ${status}`,
-          context: context.active(),
-          attributes: {
-            "http.method": method,
-            "http.route": route,
-            "http.status_code": status,
-          },
-        });
-      } catch (err) {
-        route = routePath(c);
-        status = err instanceof HTTPException ? err.status : 500;
-        span.updateName(`${method} ${route}`);
-        span.setAttribute("http.route", route);
-        span.setAttribute("http.status_code", status);
-        span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
-        span.recordException(err as Error);
-
-        logger.emit({
-          severityNumber: SeverityNumber.ERROR,
-          severityText: "ERROR",
-          body: `Error: ${method} ${route} - ${err}`,
-          context: context.active(),
-          attributes: {
-            "http.method": method,
-            "http.route": route,
-            "error.message": String(err),
-          },
-        });
-
-        throw err;
-      } finally {
-        span.end();
-      }
+        "http.status_code": status,
+      },
     });
+  } catch (err) {
+    route = routePath(c);
+    status = err instanceof HTTPException ? err.status : 500;
+
+    if (span) {
+      span.updateName(`${method} ${route}`);
+      span.setAttribute("http.route", route);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+      span.recordException(err as Error);
+    }
+
+    logger.emit({
+      severityNumber: SeverityNumber.ERROR,
+      severityText: "ERROR",
+      body: `Error: ${method} ${route} - ${err}`,
+      attributes: {
+        "http.method": method,
+        "http.route": route,
+        "error.message": String(err),
+      },
+    });
+
+    throw err;
   } finally {
     const duration = (performance.now() - start) / 1000;
     requestDuration.record(duration, {
