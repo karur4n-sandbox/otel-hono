@@ -1,5 +1,6 @@
 import "./otel";
 import { Hono } from "hono";
+import { serve } from "@hono/node-server";
 import { telemetryMiddleware } from "./middleware/telemetry";
 import sampleRoutes from "./routes/sample";
 
@@ -8,9 +9,6 @@ const app = new Hono();
 app.use("*", telemetryMiddleware);
 app.route("/", sampleRoutes);
 
-export default {
-  port: 3000,
-  fetch: app.fetch,
-};
-
-console.log("Server running on http://localhost:3000");
+serve({ fetch: app.fetch, port: 3000 }, (info) => {
+  console.log(`Server running on http://localhost:${info.port}`);
+});

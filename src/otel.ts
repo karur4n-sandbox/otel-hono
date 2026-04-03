@@ -20,8 +20,14 @@ import {
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
-import { trace, metrics } from "@opentelemetry/api";
+import { context, trace, metrics } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+
+// --- Context Manager (Bun.serve は AsyncLocalStorage を正しく伝搬しないため明示的に登録) ---
+const contextManager = new AsyncLocalStorageContextManager();
+contextManager.enable();
+context.setGlobalContextManager(contextManager);
 
 const OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4318";
 
