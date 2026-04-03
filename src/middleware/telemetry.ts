@@ -1,11 +1,12 @@
 import { createMiddleware } from "hono/factory";
-import { SpanStatusCode } from "@opentelemetry/api";
+import { context, SpanStatusCode } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
+import { routePath } from "hono/route";
 import { tracer, meter, logger } from "../otel";
 
 const requestDuration = meter.createHistogram("http.server.request.duration", {
   description: "Duration of HTTP server requests",
-  unit: "ms",
+  unit: "s",
 });
 
 const activeRequests = meter.createUpDownCounter("http.server.active_requests", {
@@ -14,73 +15,86 @@ const activeRequests = meter.createUpDownCounter("http.server.active_requests", 
 
 export const telemetryMiddleware = createMiddleware(async (c, next) => {
   const method = c.req.method;
-  const path = c.req.path;
   const start = performance.now();
+  let status = 500;
+  let route = c.req.path;
 
   activeRequests.add(1, { "http.method": method });
 
-  return tracer.startActiveSpan(`${method} ${path}`, async (span) => {
-    span.setAttributes({
-      "http.method": method,
-      "http.url": c.req.url,
-      "http.route": path,
-    });
-
-    logger.emit({
-      severityNumber: SeverityNumber.INFO,
-      severityText: "INFO",
-      body: `Incoming request: ${method} ${path}`,
-      attributes: {
+  try {
+    await tracer.startActiveSpan(`${method} ${route}`, async (span) => {
+      span.setAttributes({
         "http.method": method,
-        "http.route": path,
-      },
-    });
+        "http.url": c.req.url,
+        "http.route": route,
+      });
 
-    try {
-      await next();
+      logger.emit({
+        severityNumber: SeverityNumber.INFO,
+        severityText: "INFO",
+        body: `Incoming request: ${method} ${route}`,
+        context: context.active(),
+        attributes: {
+          "http.method": method,
+          "http.route": route,
+        },
+      });
 
-      const status = c.res.status;
-      span.setAttribute("http.status_code", status);
+      try {
+        await next();
 
-      if (status >= 400) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${status}` });
+        route = routePath(c);
+        status = c.res.status;
+        span.updateName(`${method} ${route}`);
+        span.setAttribute("http.route", route);
+        span.setAttribute("http.status_code", status);
+
+        if (status >= 400) {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${status}` });
+        }
+
+        logger.emit({
+          severityNumber: status >= 400 ? SeverityNumber.ERROR : SeverityNumber.INFO,
+          severityText: status >= 400 ? "ERROR" : "INFO",
+          body: `Response: ${method} ${route} ${status}`,
+          context: context.active(),
+          attributes: {
+            "http.method": method,
+            "http.route": route,
+            "http.status_code": status,
+          },
+        });
+      } catch (err) {
+        route = routePath(c);
+        span.updateName(`${method} ${route}`);
+        span.setAttribute("http.route", route);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+        span.recordException(err as Error);
+
+        logger.emit({
+          severityNumber: SeverityNumber.ERROR,
+          severityText: "ERROR",
+          body: `Error: ${method} ${route} - ${err}`,
+          context: context.active(),
+          attributes: {
+            "http.method": method,
+            "http.route": route,
+            "error.message": String(err),
+          },
+        });
+
+        throw err;
+      } finally {
+        span.end();
       }
-
-      logger.emit({
-        severityNumber: status >= 400 ? SeverityNumber.ERROR : SeverityNumber.INFO,
-        severityText: status >= 400 ? "ERROR" : "INFO",
-        body: `Response: ${method} ${path} ${status}`,
-        attributes: {
-          "http.method": method,
-          "http.route": path,
-          "http.status_code": status,
-        },
-      });
-    } catch (err) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
-      span.recordException(err as Error);
-
-      logger.emit({
-        severityNumber: SeverityNumber.ERROR,
-        severityText: "ERROR",
-        body: `Error: ${method} ${path} - ${err}`,
-        attributes: {
-          "http.method": method,
-          "http.route": path,
-          "error.message": String(err),
-        },
-      });
-
-      throw err;
-    } finally {
-      const duration = performance.now() - start;
-      requestDuration.record(duration, {
-        "http.method": method,
-        "http.route": path,
-        "http.status_code": c.res.status,
-      });
-      activeRequests.add(-1, { "http.method": method });
-      span.end();
-    }
-  });
+    });
+  } finally {
+    const duration = (performance.now() - start) / 1000;
+    requestDuration.record(duration, {
+      "http.method": method,
+      "http.route": route,
+      "http.status_code": status,
+    });
+    activeRequests.add(-1, { "http.method": method });
+  }
 });
