@@ -1,5 +1,7 @@
 import "./otel";
 import { Hono } from "hono";
+// Bun.serve() は AsyncLocalStorage のコンテキスト伝搬が壊れるため、
+// OTel のトレース親子関係が正しく動かない。node-server 経由で回避。
 import { serve } from "@hono/node-server";
 import { telemetryMiddleware } from "./middleware/telemetry";
 import sampleRoutes from "./routes/sample";
